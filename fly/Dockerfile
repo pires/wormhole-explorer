@@ -1,29 +1,65 @@
+#
+# ATTENTION: this image must be built from the root of the repository.
+# e.g. docker build -f fly/Dockerfile -t fly:latest .
+#
 ARG BUILDPLATFORM="linux/amd64"
-FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21.9-bullseye@sha256:311468bffa9fa4747a334b94e6ce3681b564126d653675a6adc46698b2b88d35 AS build
 
-WORKDIR /app
+#
+# This stage builds the fly binary. We use an Alpine Linux image in order
+# to respect the fact this distro is musl-based, so we shouldn't build 
+# binaries in a glibc-based image and expect them to run in Alpine Linux.
+#
+FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21-alpine AS build-fly
 
-COPY fly fly
-COPY common common
+# Install build dependencies.
+RUN apk update; apk add build-base
 
-RUN --mount=type=cache,target=/root/.go --mount=type=cache,target=/go \
-  cd fly && CGO_ENABLED=1 GOOS=linux go build -ldflags=-extldflags=-Wl,--allow-multiple-definition -o "./fly" main.go && \
-  go get github.com/CosmWasm/wasmvm@v1.0.0 && \
-  cp /go/pkg/mod/github.com/!cosm!wasm/wasmvm@v1.0.0/api/libwasmvm.x86_64.so /usr/lib/
+# Copy the source code to the build container.
+ADD ./fly /source/fly
+ADD ./common /source/common 
 
+# Build the fly binary.
+WORKDIR /source/fly
+RUN CGO_ENABLED=1 make build
 
-############################
-# STEP 2 build a small image
-############################
-FROM alpine
-#Copy certificates
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-#Copy libraries
-COPY --from=build /lib/* /lib/
-COPY --from=build /lib64/* /lib64/
-COPY --from=build /usr/lib/libwasmvm.x86_64.so /usr/lib/
-#Copy our static executable.
-COPY --from=build "/app/fly/fly" "/fly"
+#
+# This stage builds the libwasvm.x86_64.so library. We use an Alpine Linux
+# image in order to respect the fact this distro is musl-based, so we shouldn't
+# build libraries in a glibc-based image and expect them to run in Alpine Linux.
+#
+FROM --platform=${BUILDPLATFORM} cosmwasm/libwasmvm-builder:0100-alpine AS build-libwasvm
+
+# Install build dependencies.
+RUN apk update; apk add git
+
+# Download libwasvm code.
+RUN git clone https://github.com/CosmWasm/wasmvm.git --depth 1 --branch v1.5.4 /wasmvm
+
+# Build libwasvm shared-library.
+WORKDIR /wasmvm/libwasmvm
+RUN cargo build --release
+
+#
+# This stage updates the CA certificates present in Alpine Linux, which
+# will be used by the final image.
+#
+FROM --platform=${BUILDPLATFORM} alpine AS ca-certs
+
+# Install ca-certificates.
+RUN apk update; apk add ca-certificates
+#; update ca-certificates
+
+# Build the final (minimalistic) Alpine Linux image.
+FROM --platform=${BUILDPLATFORM} alpine
+
+# Copy the CA certificates from the ca-certs image.
+COPY --from=ca-certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Add the libwasvm.x86_64.so library.
+COPY --from=build-libwasvm /wasmvm/libwasmvm/target/release/libwasmvm..so /usr/lib/libwasmvm.x86_64.so
+
+# Add the fly binary.
+COPY --from=build-fly "/source/fly/fly" "/fly"
 
 # Run the binary.
 ENTRYPOINT ["/fly"]

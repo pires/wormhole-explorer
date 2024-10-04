@@ -1,21 +1,46 @@
+#
+# ATTENTION: this image must be built from the root of the repository.
+# e.g. docker build -f spy/Dockerfile -t spy:latest .
+#
 ARG BUILDPLATFORM="linux/amd64"
-FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21.9-bullseye@sha256:311468bffa9fa4747a334b94e6ce3681b564126d653675a6adc46698b2b88d35 AS build
+ARG DEBIAN_FRONTEND="noninteractive"
 
-WORKDIR /app
+#
+# This stage builds the spy binary.
+#
+FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21-bookworm AS build
+ENV DEBIAN_FRONTEND=${DEBIAN_FRONTEND}
 
-COPY spy spy
-COPY common common
+# Install build dependencies.
+RUN apt update; apt install -y build-essential
 
-# Build the Go app
-RUN cd spy && CGO_ENABLED=0 GOOS=linux go build -o "./spy" cmd/main.go
+# Copy the source code to the build container.
+ADD ./spy /source/spy
+ADD ./common /source/common 
 
-############################
-# STEP 2 build a small image
-############################
-FROM alpine
-#Copy certificates
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-# Copy our static executable.
-COPY --from=build "/app/spy/spy" "/spy"
+# Build the spy binary.
+WORKDIR /source/spy
+RUN make build
+
+#
+# This stage updates the CA certificates.
+#
+FROM --platform=${BUILDPLATFORM} debian:bookworm AS ca-certs
+ENV DEBIAN_FRONTEND=${DEBIAN_FRONTEND}
+
+# Install ca-certificates.
+RUN apt update; apt upgrade -y ca-certificates
+
+#
+# Build the final (minimalistic) image.
+#
+FROM --platform=${BUILDPLATFORM} gcr.io/distroless/static-debian12:nonroot
+
+# Copy the CA certificates from the ca-certs image.
+COPY --from=ca-certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Add the spy binary.
+COPY --from=build "/source/spy/spy" "/spy"
+
 # Run the binary.
 ENTRYPOINT ["/spy"]

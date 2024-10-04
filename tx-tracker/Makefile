@@ -1,6 +1,3 @@
-SHELL := /bin/bash
-
-
 ## help: print this help message
 .PHONY: help
 help:
@@ -8,10 +5,9 @@ help:
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
 
 build:
-	CGO_ENABLED=0 GOOS=linux go build -o "./bin/tx-tracker" cmd/main.go
+	CGO_ENABLED=0 GOOS=linux go build -o tx-tracker cmd/main.go
 
 test:
 	go test -v -cover ./...
-
 
 .PHONY: build test

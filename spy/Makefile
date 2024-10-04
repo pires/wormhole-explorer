@@ -1,6 +1,3 @@
-SHELL := /bin/bash
-
-
 ## help: print this help message
 .PHONY: help
 help:

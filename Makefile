@@ -1,8 +1,5 @@
-SHELL := /bin/bash
-
-
 ## help: print this help message
-.PHONY: help
+.PHONY: help build doc test
 help:
 	@echo 'Usage:'
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
@@ -25,5 +22,3 @@ test:
 	cd spy && go test -v -cover ./...
 	cd parser && go test -v -cover ./...
 	cd tx-tracker && go test -v -cover ./...
-
-.PHONY: build doc test

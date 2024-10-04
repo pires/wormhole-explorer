@@ -1,21 +1,46 @@
+#
+# ATTENTION: this image must be built from the root of the repository.
+# e.g. docker build -f notional/Dockerfile -t notional:latest .
+#
 ARG BUILDPLATFORM="linux/amd64"
-FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21.9-bullseye@sha256:311468bffa9fa4747a334b94e6ce3681b564126d653675a6adc46698b2b88d35 AS build
+ARG DEBIAN_FRONTEND="noninteractive"
 
-WORKDIR /app
+#
+# This stage builds the notional binary.
+#
+FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21-bookworm AS build-notional
+ENV DEBIAN_FRONTEND=${DEBIAN_FRONTEND}
 
-COPY notional notional
-COPY common common
+# Install build dependencies.
+RUN apt update; apt install -y build-essential
 
-# Build the Go app
-RUN cd notional && make build
+# Copy the source code to the build container.
+ADD ./notional /source/notional
+ADD ./common /source/common 
 
-############################
-# STEP 2 build a small image
-############################
-FROM alpine
-#Copy certificates
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-# Copy our static executable.
-COPY --from=build "/app/notional/notional" "/notional"
+# Build the notional binary.
+WORKDIR /source/notional
+RUN make build
+
+#
+# This stage updates the CA certificates.
+#
+FROM --platform=${BUILDPLATFORM} debian:bookworm AS ca-certs
+ENV DEBIAN_FRONTEND=${DEBIAN_FRONTEND}
+
+# Install ca-certificates.
+RUN apt update; apt upgrade -y ca-certificates
+
+#
+# Build the final (minimalistic) image.
+#
+FROM --platform=${BUILDPLATFORM} gcr.io/distroless/static-debian12:nonroot
+
+# Copy the CA certificates from the ca-certs image.
+COPY --from=ca-certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Add the notional binary.
+COPY --from=build-notional "/source/notional/notional" "/notional"
+
 # Run the binary.
 ENTRYPOINT ["/notional"]

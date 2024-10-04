@@ -1,5 +1,3 @@
-SHELL := /bin/bash
-
 # These will be provided to the target
 GIT := github.com/wormhole-foundation/wormhole-explorer/api/internal/
 VERSION := 1.0.0
@@ -8,7 +6,6 @@ AUTHOR := `whoami`
 BUILD_DATE := `date +%Y%m%d%H%M%S`
 BRANCH := `git branch --show-current`
 MACHINE := `uname -n`
-
 
 # Use linker flags to provide version/build settings to the target
 LDFLAGS=-ldflags "-X=$(GIT)build.Version=$(VERSION)\
@@ -20,20 +17,16 @@ LDFLAGS=-ldflags "-X=$(GIT)build.Version=$(VERSION)\
 
 
 ## help: print this help message
-.PHONY: help
+.PHONY: help build doc test
 help:
 	@echo 'Usage:'
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
 
 build:
-	CGO_ENABLED=0 GOOS=linux go build -v $(LDFLAGS) -o api main.go
+	CGO_ENABLED=0 GOOS=linux go build -v $(LDFLAGS) -o bin/api main.go
 	
 doc:
 	swag init -pd
 
-
 test:
 	go test -v -cover ./...
-
-
-.PHONY: build doc test

@@ -1,22 +1,46 @@
+#
+# ATTENTION: this image must be built from the root of the repository.
+# e.g. docker build -f tx-tracker/Dockerfile -t tx-tracker:latest .
+#
 ARG BUILDPLATFORM="linux/amd64"
-FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21.9-bullseye@sha256:311468bffa9fa4747a334b94e6ce3681b564126d653675a6adc46698b2b88d35 AS build
+ARG DEBIAN_FRONTEND="noninteractive"
 
-WORKDIR /app
+#
+# This stage builds the tx-tracker binary.
+#
+FROM --platform=${BUILDPLATFORM} docker.io/golang:1.21-bookworm AS build
+ENV DEBIAN_FRONTEND=${DEBIAN_FRONTEND}
 
-COPY tx-tracker tx-tracker
-COPY common common
+# Install build dependencies.
+RUN apt update; apt install -y build-essential
 
+# Copy the source code to the build container.
+ADD ./tx-tracker /source/tx-tracker
+ADD ./common /source/common 
 
-# Build the Go app
-RUN cd tx-tracker && CGO_ENABLED=0 GOOS=linux go build -o "./tx-tracker" cmd/main.go
+# Build the tx-tracker binary.
+WORKDIR /source/tx-tracker
+RUN make build
 
-############################
-# STEP 2 build a small image
-############################
-FROM alpine
-#Copy certificates
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-# Copy our static executable.
-COPY --from=build "/app/tx-tracker/tx-tracker" "/tx-tracker"
+#
+# This stage updates the CA certificates.
+#
+FROM --platform=${BUILDPLATFORM} debian:bookworm AS ca-certs
+ENV DEBIAN_FRONTEND=${DEBIAN_FRONTEND}
+
+# Install ca-certificates.
+RUN apt update; apt upgrade -y ca-certificates
+
+#
+# Build the final (minimalistic) image.
+#
+FROM --platform=${BUILDPLATFORM} gcr.io/distroless/static-debian12:nonroot
+
+# Copy the CA certificates from the ca-certs image.
+COPY --from=ca-certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Add the tx-tracker binary.
+COPY --from=build "/source/tx-tracker/tx-tracker" "/tx-tracker"
+
 # Run the binary.
 ENTRYPOINT ["/tx-tracker"]
